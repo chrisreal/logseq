@@ -47,21 +47,21 @@
 ;; Enable for local development
 ;; (def PUBLISH-API-BASE "http://localhost:8787")
 
+;; Self-hosted sync server configuration
+(def SELF-HOSTED-SYNC-URL "10.241.19.175:8787")
+
 (goog-define ENABLE-DB-SYNC-LOCAL false)
 (defonce db-sync-local? ENABLE-DB-SYNC-LOCAL)
 
 (defonce db-sync-ws-url
   (if db-sync-local?
-    "ws://127.0.0.1:8787/sync/%s"
-    ;; "wss://api-staging.logseq.io/sync/%s"
+    (str "ws://" SELF-HOSTED-SYNC-URL "/sync/%s")
     "wss://api.logseq.io/sync/%s"))
 
 (defonce db-sync-http-base
   (if db-sync-local?
-    "http://127.0.0.1:8787"
-    ;; "https://api-staging.logseq.io"
-    "https://api.logseq.io"
-    ))
+    (str "http://" SELF-HOSTED-SYNC-URL)
+    "https://api.logseq.io"))
 
 ;; Feature flags
 ;; =============
