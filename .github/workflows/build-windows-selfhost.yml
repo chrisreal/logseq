@@ -1,0 +1,95 @@
+name: Build Windows Client (Self-Hosted)
+
+on:
+  push:
+    branches: [self-hosted-sync]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '22'
+  JAVA_VERSION: '21'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Install Clojure
+        shell: pwsh
+        run: |
+          $url = "https://github.com/clojure/brew-install/releases/latest/download/windows-install.ps1"
+          Invoke-WebRequest -Uri $url -OutFile windows-install.ps1
+          ./windows-install.ps1
+
+      - name: Verify installations
+        run: |
+          node --version
+          java -version
+          clojure --version
+
+      - name: Install root dependencies
+        run: yarn install
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+
+      - name: Build ClojureScript for Electron
+        run: yarn cljs:release-electron
+        env:
+          ENABLE_DB_SYNC_LOCAL: "true"
+
+      - name: Install Electron app dependencies
+        working-directory: static
+        run: yarn install
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+
+      - name: Rebuild native modules for Electron
+        working-directory: static
+        run: yarn rebuild:win
+
+      - name: Build Windows installer
+        working-directory: static
+        run: yarn electron:make --platform=win32 --arch=x64
+        env:
+          ENABLE_DB_SYNC_LOCAL: "true"
+
+      - name: List build artifacts
+        working-directory: static/out/make
+        shell: pwsh
+        run: Get-ChildItem -Recurse | Select-Object FullName, Length
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: logseq-windows-x64-selfhost
+          path: |
+            static/out/make/zip/win32/x64/*.zip
+            static/out/make/squirrel/windows/x64/*.exe
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Create release on tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            static/out/make/zip/win32/x64/*.zip
+            static/out/make/squirrel/windows/x64/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
