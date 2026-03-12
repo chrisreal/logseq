@@ -108,6 +108,7 @@
                (not
                 (or (:batch-temp-conn? @conn)
                     (:rtc-download-graph? tx-meta)
+                    (:rtc-tx? tx-meta)
                     (:reset-conn! tx-meta)
                     (:initial-db? tx-meta)
                     (:skip-validate-db? tx-meta false)
