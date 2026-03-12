@@ -1,5 +1,6 @@
 (ns logseq.db-sync.worker.handler.sync
   (:require [clojure.string :as string]
+            [datascript.core :as d]
             [lambdaisland.glogi :as log]
             [logseq.db :as ldb]
             [logseq.db-sync.batch :as batch]
@@ -10,9 +11,10 @@
             [logseq.db-sync.worker.http :as http]
             [logseq.db-sync.worker.routes.sync :as sync-routes]
             [logseq.db-sync.worker.ws :as ws]
+            [logseq.db.frontend.schema :as db-schema]
             [promesa.core :as p]))
 
-(def ^:private snapshot-download-batch-size 5000)
+(def ^:private snapshot-download-batch-size 10000)
 (def ^:private snapshot-cache-control "private, max-age=300")
 (def ^:private snapshot-content-type "application/transit+json")
 (def ^:private snapshot-content-encoding "gzip")
@@ -56,6 +58,22 @@
                     "select addr, content, addresses from kvs where addr > ? order by addr asc limit ?"
                     after
                     limit)))
+
+(defn- snapshot-row-count
+  [sql]
+  (let [row (first (common/get-sql-rows
+                    (common/sql-exec sql "select count(*) as total from kvs")))]
+    (cond
+      (array? row)
+      (aget row 0)
+
+      (some? row)
+      (or (aget row "total")
+          (aget row "count(*)")
+          0)
+
+      :else
+      0)))
 
 (defn- snapshot-row->tuple [row]
   (if (array? row)
@@ -264,7 +282,35 @@
   (let [sql (.-sql self)]
     (ensure-conn! self)
     (let [conn (.-conn self)
-          tx-data (protocol/transit->tx txs)]
+          lookup-id (fn [x]
+                      (when (and (vector? x)
+                                 (= 2 (count x))
+                                 (= :block/uuid (first x)))
+                        (second x)))
+          tx-data* (protocol/transit->tx txs)
+          created-block-uuids (->> tx-data*
+                                   (keep (fn [item]
+                                           (when (and (vector? item)
+                                                      (= :db/add (first item))
+                                                      (>= (count item) 4)
+                                                      (= :block/uuid (nth item 2)))
+                                             (nth item 3))))
+                                   set)
+          missing-lookup-ref? (fn [x]
+                                (when-let [block-uuid (lookup-id x)]
+                                  (and (not (contains? created-block-uuids block-uuid))
+                                       (nil? (d/entity @conn x)))))
+          tx-data (remove (fn [item]
+                            (when (vector? item)
+                              (let [op (first item)
+                                    attr (nth item 2 nil)
+                                    value (when (>= (count item) 4) (nth item 3))]
+                                (or (and (contains? #{:db/add :db/retract :db/retractEntity} op)
+                                         (missing-lookup-ref? (second item)))
+                                    (and (contains? #{:db/add :db/retract} op)
+                                         (contains? db-schema/ref-type-attributes attr)
+                                         (missing-lookup-ref? value))))))
+                          tx-data*)]
       (ldb/transact! conn tx-data {:op :apply-client-tx})
       (let [new-t (storage/get-t sql)]
         ;; FIXME: no need to broadcast if client tx is less than remote tx
@@ -314,6 +360,7 @@
       (http/bad-request "missing graph id")
       (let [use-compression? (exists? js/CompressionStream)
             content-encoding (when use-compression? snapshot-content-encoding)
+            row-count (snapshot-row-count (.-sql self))
             stream (snapshot-export-stream self)
             stream (if use-compression?
                      (maybe-compress-stream stream)
@@ -323,6 +370,7 @@
                            :headers (js/Object.assign
                                      #js {"content-type" snapshot-content-type
                                           "content-encoding" (or content-encoding "identity")}
+                                     #js {"x-snapshot-row-count" (str row-count)}
                                      (common/cors-headers))})))))
 
 (defn- handle-sync-snapshot-download
