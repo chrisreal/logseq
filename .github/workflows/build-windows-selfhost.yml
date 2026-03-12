@@ -1,9 +1,7 @@
 name: Build Windows Client (Self-Hosted)
 
 on:
-  push:
-    branches: [self-hosted-sync]
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger only
 
 env:
   NODE_VERSION: '22'
@@ -45,6 +43,11 @@ jobs:
         run: yarn install
         env:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
+
+      - name: Build ClojureScript
+        run: yarn cljs:release-electron
+        env:
+          ENABLE_DB_SYNC_LOCAL: "true"
 
       - name: Build Electron app
         run: yarn release-electron
