@@ -30,6 +30,18 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache yarn cache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -41,13 +53,21 @@ jobs:
         with:
           cli: ${{ env.CLOJURE_VERSION }}
 
+      - name: Cache clojure deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: ${{ runner.os }}-clojure-lib-${{ hashFiles('**/deps.edn') }}
+
       - name: Install dependencies
         run: yarn install
         env:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
 
       - name: Compile CLJS and web bundles
-        run: yarn cljs:release-electron && yarn webpack-app-build
+        run: gulp build && yarn cljs:release-electron && yarn webpack-app-build
         env:
           ENABLE_DB_SYNC_LOCAL: "true"
 
@@ -79,6 +99,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path-win
+        shell: pwsh
+        run: echo "dir=$(yarn cache dir)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Cache yarn cache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache-dir-path-win.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
 
       - name: Install static dependencies
         run: yarn install
