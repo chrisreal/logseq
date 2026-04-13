@@ -119,25 +119,70 @@
                                    :fail-fast-f fail-fast}))
                    :upload-path-f sync-temp-sqlite/upload-temp-sqlite-path}))
           datoms (d/datoms @source-conn :eavt)
+          _ (log/info :db-sync/upload-debug
+                      {:stage :prepare-upload-temp-sqlite/start
+                       :repo repo
+                       :graph-id graph-id
+                       :datoms-count (count datoms)
+                       :aes-key? (boolean aes-key)})
           _ (sync-large-title/process-upload-datoms-in-batches!
              datoms
              {:batch-size upload-prepare-datoms-batch-size
               :process-batch-f
               (fn [batch]
+                (log/info :db-sync/upload-debug
+                          {:stage :prepare-upload-temp-sqlite/batch-start
+                           :repo repo
+                           :graph-id graph-id
+                           :batch-size (count batch)
+                           :aes-key? (boolean aes-key)
+                           :first-entity-id (some-> batch first :e)})
                 (p/let [datoms* (sync-large-title/offload-large-titles-in-datoms-batch
                                  repo graph-id batch aes-key sync-large-title/upload-large-title!)
+                        _ (log/info :db-sync/upload-debug
+                                    {:stage :prepare-upload-temp-sqlite/after-large-title-offload
+                                     :repo repo
+                                     :graph-id graph-id
+                                     :batch-size (count batch)})
                         encrypted-datoms (if aes-key
                                            (sync-crypt/<encrypt-datoms aes-key datoms*)
                                            datoms*)
+                        _ (log/info :db-sync/upload-debug
+                                    {:stage :prepare-upload-temp-sqlite/after-encrypt
+                                     :repo repo
+                                     :graph-id graph-id
+                                     :batch-size (count batch)})
                         tx-data (mapv sync-large-title/datom->tx encrypted-datoms)]
+                  (log/info :db-sync/upload-debug
+                            {:stage :prepare-upload-temp-sqlite/transact
+                             :repo repo
+                             :graph-id graph-id
+                             :tx-count (count tx-data)})
                   (d/transact! (:conn temp) tx-data {:initial-db? true})
+                  (log/info :db-sync/upload-debug
+                            {:stage :prepare-upload-temp-sqlite/batch-done
+                             :repo repo
+                             :graph-id graph-id
+                             :batch-size (count batch)})
                   nil))
               :progress-f
               (fn [processed total]
+                (log/info :db-sync/upload-debug
+                          {:stage :prepare-upload-temp-sqlite/progress
+                           :repo repo
+                           :graph-id graph-id
+                           :processed processed
+                           :total total
+                           :aes-key? (boolean aes-key)})
                 (update-progress {:sub-type :upload-progress
                                   :message (if aes-key
                                              (str "Encrypting " processed "/" total)
                                              (str "Preparing " processed "/" total))}))})]
+    (log/info :db-sync/upload-debug
+              {:stage :prepare-upload-temp-sqlite/done
+               :repo repo
+               :graph-id graph-id
+               :temp-path (:path temp)})
     temp))
 
 (defn upload-graph!
@@ -161,15 +206,32 @@
                             (sync-crypt/<ensure-graph-aes-key repo graph-id))
                   _ (when (and graph-e2ee? (nil? aes-key))
                       (fail-fast :db-sync/missing-field {:repo repo :field :aes-key}))]
+            (log/info :db-sync/upload-debug
+                      {:stage :upload-graph/start
+                       :repo repo
+                       :graph-id graph-id
+                       :base base
+                       :graph-e2ee? graph-e2ee?
+                       :aes-key? (boolean aes-key)})
             (set-graph-sync-metadata! repo graph-e2ee?)
             (ensure-client-graph-uuid! repo graph-id)
             (let [snapshot-checksum (sync-checksum/recompute-checksum @source-conn)]
+              (log/info :db-sync/upload-debug
+                        {:stage :upload-graph/after-checksum
+                         :repo repo
+                         :graph-id graph-id
+                         :snapshot-checksum snapshot-checksum})
               (client-op/update-local-checksum repo snapshot-checksum)
               (p/let [_ (update-progress {:sub-type :upload-progress
                                           :message (if graph-e2ee? "Encrypting..." "Preparing...")})
                       {:keys [db] :as temp} (<prepare-upload-temp-sqlite!
                                              repo graph-id source-conn aes-key update-progress)
                       total-rows (count-kvs-rows db)]
+                (log/info :db-sync/upload-debug
+                          {:stage :upload-graph/temp-ready
+                           :repo repo
+                           :graph-id graph-id
+                           :total-rows total-rows})
                 (-> (p/loop [last-addr -1
                              first-batch? true
                              loaded 0]

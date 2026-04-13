@@ -5,6 +5,7 @@
             [datascript.storage :refer [IStorage]]
             [logseq.db.common.sqlite :as common-sqlite]
             [logseq.db.sqlite.util :as sqlite-util]
+            [lambdaisland.glogi :as log]
             [promesa.core :as p]))
 
 (defn- upsert-addr-content!
@@ -71,17 +72,33 @@
           _ (when (zero? capacity)
               (.unpauseVfs pool))
           path (upload-path-f)
+          _ (log/info :db-sync/upload-debug
+                      {:stage :temp-sqlite/create-db/start
+                       :path path
+                       :capacity capacity})
           ^js db (new (.-OpfsSAHPoolDb pool) path)]
     (common-sqlite/create-kvs-table! db)
+    (log/info :db-sync/upload-debug
+              {:stage :temp-sqlite/create-db/done
+               :path path
+               :capacity capacity})
     {:db db
      :path path
      :pool pool}))
 
 (defn <create-temp-sqlite-conn
   [schema datoms create-db-f]
+  (log/info :db-sync/upload-debug
+            {:stage :temp-sqlite/create-conn/start})
   (p/let [{:keys [db path pool]} (create-db-f)
           storage (new-temp-sqlite-storage db)
+          _ (log/info :db-sync/upload-debug
+                      {:stage :temp-sqlite/create-conn/before-conn-from-datoms
+                       :path path})
           conn (d/conn-from-datoms datoms schema {:storage storage})]
+    (log/info :db-sync/upload-debug
+              {:stage :temp-sqlite/create-conn/done
+               :path path})
     {:db db
      :conn conn
      :path path

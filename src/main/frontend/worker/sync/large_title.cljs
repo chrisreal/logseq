@@ -2,6 +2,7 @@
   "Large title offload and rehydration helpers for db sync."
   (:require [datascript.core :as d]
             [logseq.db :as ldb]
+            [lambdaisland.glogi :as log]
             [promesa.core :as p]))
 
 (def large-title-byte-limit 4096)
@@ -210,17 +211,35 @@
   [datoms {:keys [batch-size process-batch-f progress-f]
            :or {batch-size 100000}}]
   (let [total-count (count datoms)]
+    (log/info :db-sync/upload-debug
+              {:stage :prepare-upload-datoms/start
+               :total-count total-count
+               :batch-size batch-size})
     (p/loop [remaining (seq datoms)
              processed 0]
       (if (seq remaining)
         (let [[batch remaining'] (take-upload-datoms-batch remaining batch-size)
               processed' (+ processed (count batch))]
+          (log/info :db-sync/upload-debug
+                    {:stage :prepare-upload-datoms/batch-start
+                     :processed processed
+                     :processed' processed'
+                     :batch-size (count batch)
+                     :total-count total-count})
           (p/let [_ (process-batch-f batch)]
             (when progress-f
               (progress-f processed' total-count))
+            (log/info :db-sync/upload-debug
+                      {:stage :prepare-upload-datoms/batch-done
+                       :processed processed'
+                       :total-count total-count})
             (p/let [_ (js/Promise. (fn [resolve] (js/setTimeout resolve 0)))]
               (p/recur remaining' processed'))))
-        nil))))
+        (do
+          (log/info :db-sync/upload-debug
+                    {:stage :prepare-upload-datoms/done
+                     :total-count total-count})
+          nil)))))
 
 (defn rehydrate-large-titles-from-db!
   [repo graph-id {:keys [get-conn-f rehydrate-large-titles!-f]}]
