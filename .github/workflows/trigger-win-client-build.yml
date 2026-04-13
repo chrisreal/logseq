@@ -1,0 +1,141 @@
+name: Temp Windows Client Build (Self-Hosted Sync V2)
+
+on:
+  push:
+    branches:
+      - ci/trigger-win-client-build
+
+env:
+  NODE_VERSION: "22"
+  JAVA_VERSION: "21"
+  CLOJURE_VERSION: "1.11.1.1435"
+
+jobs:
+  compile-static:
+    name: Compile web/static assets
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: self-hosted-sync-v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache yarn cache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Clojure
+        uses: DeLaGuardo/setup-clojure@13.5
+        with:
+          cli: ${{ env.CLOJURE_VERSION }}
+
+      - name: Cache clojure deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: ${{ runner.os }}-clojure-lib-${{ hashFiles('**/deps.edn') }}
+
+      - name: Install dependencies
+        run: yarn install
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+
+      - name: Compile CLJS and web bundles
+        run: gulp build && yarn cljs:release-electron && yarn webpack-app-build
+        env:
+          ENABLE_DB_SYNC_LOCAL: "true"
+
+      - name: Upload static artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: static
+          path: static
+
+  build-windows:
+    name: Build Windows desktop package
+    runs-on: windows-latest
+    needs: [compile-static]
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: self-hosted-sync-v2
+
+      - name: Download static artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: static
+          path: static
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path-win
+        shell: pwsh
+        run: echo "dir=$(yarn cache dir)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Cache yarn cache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache-dir-path-win.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install static dependencies
+        run: yarn install
+        working-directory: static
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+
+      - name: Build Electron app (Windows x64)
+        run: yarn electron:make
+        working-directory: static
+        env:
+          DEBUG: electron-packager
+          ENABLE_DB_SYNC_LOCAL: "true"
+
+      - name: Save build artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path builds | Out-Null
+          Get-ChildItem static/out/make -Recurse
+          Move-Item static/out/make/squirrel.windows/x64/*.nupkg builds/ -ErrorAction SilentlyContinue
+          Move-Item static/out/make/zip/win32/x64/*.exe builds/ -ErrorAction SilentlyContinue
+          Move-Item static/out/make/wix/x64/*.msi builds/ -ErrorAction SilentlyContinue
+          Move-Item static/out/make/squirrel.windows/x64/RELEASES builds/ -ErrorAction SilentlyContinue
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: logseq-windows-x64-selfhost
+          path: builds
+          retention-days: 30
