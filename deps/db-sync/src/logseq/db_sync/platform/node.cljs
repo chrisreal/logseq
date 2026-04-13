@@ -3,6 +3,14 @@
             [logseq.db-sync.platform.core :as core]
             [promesa.core :as p]))
 
+(defn- first-header-value [^js headers k]
+  (when-let [value (aget headers k)]
+    (let [value (-> (str value)
+                    (string/split #",")
+                    first
+                    string/trim)]
+      (not-empty value))))
+
 (defn- headers->object [headers]
   (let [out (js-obj)]
     (.forEach headers (fn [value key] (aset out key value)))
@@ -18,8 +26,12 @@
               (when (some? value)
                 (.set headers (string/lower-case k) value))))
         method (or (.-method req) "GET")
-        host (or host (aget node-headers "host") "localhost")
-        scheme (or scheme "http")
+        forwarded-host (or (first-header-value node-headers "x-forwarded-host")
+                           (first-header-value node-headers "host"))
+        forwarded-proto (or (first-header-value node-headers "x-forwarded-proto")
+                            (first-header-value node-headers "x-forwarded-scheme"))
+        host (or forwarded-host host (aget node-headers "host") "localhost")
+        scheme (or forwarded-proto scheme "http")
         url (str scheme "://" host (.-url req))
         init #js {:method method
                   :headers headers}]
