@@ -1,0 +1,60 @@
+name: CLI Build Temp
+
+on:
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        description: "Git ref to build"
+        required: true
+        default: "feat/cliable"
+
+env:
+  CLOJURE_VERSION: '1.11.1.1413'
+  JAVA_VERSION: '11'
+  NODE_VERSION: '22'
+  BABASHKA_VERSION: '1.12.215'
+
+jobs:
+  build-cli:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git-ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+          cache-dependency-path: yarn.lock
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Clojure
+        uses: DeLaGuardo/setup-clojure@13.5
+        with:
+          cli: ${{ env.CLOJURE_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
+
+      - name: Fetch yarn deps
+        run: yarn install --frozen-lockfile
+
+      - name: Compile CLI and db-worker-node
+        run: clojure -M:cljs compile logseq-cli && yarn db-worker-node:release:bundle
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: logseq-cli-build
+          path: |
+            static/logseq-cli.js
+            static/db-worker-node.js
+            dist/db-worker-node.js
+            dist/db-worker-node-assets.json
