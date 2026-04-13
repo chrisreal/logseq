@@ -482,4 +482,3 @@
             :beta (alpha-or-beta-user?)
             :alpha (alpha-user?)
             false)))))
-)
