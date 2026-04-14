@@ -10,6 +10,13 @@ on:
         description: "Git ref to build"
         required: true
         default: "feat/cliable"
+      release-tag:
+        description: "Optional GitHub release tag to publish the CLI tarball"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
 
 env:
   CLOJURE_VERSION: '1.11.1.1413'
@@ -52,6 +59,12 @@ jobs:
       - name: Compile CLI and db-worker-node
         run: clojure -M:cljs compile logseq-cli db-worker-node && yarn db-worker-node:compile:bundle
 
+      - name: Pack CLI tarball
+        run: |
+          mkdir -p artifacts
+          tarball=$(npm pack --pack-destination artifacts | tail -n 1)
+          mv "artifacts/${tarball}" "artifacts/logseq-cli-${GITHUB_SHA::7}.tgz"
+
       - name: Upload CLI runtime artifact
         uses: actions/upload-artifact@v4
         with:
@@ -63,3 +76,19 @@ jobs:
             dist/db-worker-node.js
             dist/db-worker-node-assets.json
             .shadow-cljs/builds/logseq-cli/dev/out/cljs-runtime/**
+
+      - name: Upload CLI package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: logseq-cli-package
+          path: artifacts/*.tgz
+
+      - name: Publish CLI release asset
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release-tag != '' }}
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.inputs.release-tag }}
+          name: Logseq CLI ${{ github.event.inputs.release-tag }}
+          files: artifacts/*.tgz

@@ -7,8 +7,11 @@
         "logseq": "dist/logseq.js"
     },
     "files": [
+        "bin/logseq",
         "dist/",
         "static/logseq-cli.js",
+        "static/db-worker-node.js",
+        ".shadow-cljs/builds/logseq-cli/dev/out/cljs-runtime/**",
         "skills/logseq-cli/SKILL.md"
     ],
     "engines": {
