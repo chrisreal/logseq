@@ -62,3 +62,4 @@ jobs:
             static/db-worker-node.js
             dist/db-worker-node.js
             dist/db-worker-node-assets.json
+            .shadow-cljs/builds/logseq-cli/dev/out/cljs-runtime/**
