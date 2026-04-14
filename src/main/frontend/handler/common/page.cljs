@@ -2,25 +2,26 @@
   "Common fns for file and db based page handlers, including create!, delete!
   and favorite fns. This ns should be agnostic of file or db concerns but there
   is still some file-specific tech debt to remove from create!"
-  (:require [clojure.set :as set]
-            [clojure.string :as string]
-            [datascript.core :as d]
-            [dommy.core :as dom]
-            [frontend.db :as db]
-            [frontend.db.conn :as conn]
-            [frontend.handler.config :as config-handler]
-            [frontend.handler.db-based.editor :as db-editor-handler]
-            [frontend.handler.notification :as notification]
-            [frontend.handler.route :as route-handler]
-            [frontend.handler.ui :as ui-handler]
-            [frontend.modules.outliner.op :as outliner-op]
-            [frontend.modules.outliner.ui :as ui-outliner-tx]
-            [frontend.state :as state]
-            [logseq.common.config :as common-config]
-            [logseq.common.util :as common-util]
-            [logseq.common.util.page-ref :as page-ref]
-            [logseq.db :as ldb]
-            [promesa.core :as p]))
+  (:require
+   [clojure.set :as set]
+   [clojure.string :as string]
+   [datascript.core :as d]
+   [dommy.core :as dom]
+   [frontend.db :as db]
+   [frontend.db.conn :as conn]
+   [frontend.handler.config :as config-handler]
+   [frontend.handler.db-based.editor :as db-editor-handler]
+   [frontend.handler.notification :as notification]
+   [frontend.handler.route :as route-handler]
+   [frontend.handler.ui :as ui-handler]
+   [frontend.modules.outliner.op :as outliner-op]
+   [frontend.modules.outliner.ui :as ui-outliner-tx]
+   [frontend.state :as state]
+   [logseq.common.config :as common-config]
+   [logseq.common.util :as common-util]
+   [logseq.common.util.page-ref :as page-ref]
+   [logseq.db :as ldb]
+   [promesa.core :as p]))
 
 (defn- wrap-tags
   "Tags might have multiple words"
@@ -51,10 +52,11 @@
                       (some-> (first
                                (common-util/split-first (str "#" page-ref/left-brackets) (:block/title parsed-result)))
                               string/trim)
-                      title)]
+                      title)
+             page-title (if (and has-tags? (nil? title'))
+                          title
+                          title')]
        (cond
-         (and has-tags? (nil? title'))
-         (notification/show! "Page name can't include \"#\"." :error)
          (and has-tags?
               (seq (set/intersection ldb/private-tags (set (map :db/ident (:block/tags parsed-result))))))
          (notification/show! (str "New page can't set built-in tags: "
@@ -63,8 +65,8 @@
                                                      (:block/tags parsed-result))))
                              :error)
          :else
-         (when-not (string/blank? title')
-           (p/let [existing-page (when-not class? (db/get-page title'))]
+         (when-not (string/blank? page-title)
+           (p/let [existing-page (when-not class? (db/get-page page-title))]
              (if existing-page
                existing-page
                (p/let [options' (cond-> (update options :tags concat (:block/tags parsed-result))
@@ -72,8 +74,8 @@
                                   (assoc :split-namespace? true))
                        [_page-name page-uuid] (ui-outliner-tx/transact!
                                                {:outliner-op :create-page}
-                                               (outliner-op/create-page! title' options'))
-                       page (db/get-page (or page-uuid title'))]
+                                               (outliner-op/create-page! page-title options'))
+                       page (db/get-page (or page-uuid page-title))]
                  (when redirect?
                    (route-handler/redirect-to-page! page-uuid)
                    (when-not today-journal?
@@ -157,18 +159,10 @@
 ;; =========
 
 (defn after-page-deleted!
-  [page-name tx-meta]
-    ;; TODO: move favorite && unfavorite to worker too
+  [page-name]
+  ;; TODO: move favorite && unfavorite to worker too
   (when-let [page-block-uuid (:block/uuid (db/get-page page-name))]
-    (<db-unfavorite-page! page-block-uuid))
-
-  (when (and (not= :rename-page (:real-outliner-op tx-meta))
-             (= (some-> (state/get-current-page) common-util/page-name-sanity-lc)
-                (common-util/page-name-sanity-lc page-name)))
-    (route-handler/redirect-to-home!))
-
-    ;; TODO: why need this?
-  (ui-handler/re-render-root!))
+    (<db-unfavorite-page! page-block-uuid)))
 
 (defn after-page-renamed!
   [repo {:keys [page-id old-name new-name]}]

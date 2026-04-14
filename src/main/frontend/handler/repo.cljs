@@ -1,6 +1,5 @@
 (ns frontend.handler.repo
   "System-component-like ns that manages user's repos/graphs"
-  (:refer-clojure :exclude [clone])
   (:require [clojure.string :as string]
             [electron.ipc :as ipc]
             [frontend.config :as config]
@@ -17,7 +16,6 @@
             [frontend.persist-db :as persist-db]
             [frontend.search :as search]
             [frontend.state :as state]
-            [frontend.undo-redo :as undo-redo]
             [frontend.util :as util]
             [frontend.util.text :as text-util]
             [logseq.db.frontend.schema :as db-schema]
@@ -52,10 +50,7 @@
 (defn start-repo-db-if-not-exists!
   [repo & {:as opts}]
   (state/set-current-repo! repo)
-  (db/start-db-conn! repo (assoc opts
-                                 :db-graph? true
-                                 :listen-handler (fn [conn]
-                                                   (undo-redo/listen-db-changes! repo conn)))))
+  (db/start-db-conn! repo (assoc opts :db-graph? true)))
 
 (defn restore-and-setup-repo!
   "Restore the db of a graph from the persisted data, and setup. Create a new
@@ -76,13 +71,15 @@
 (defn get-repos
   []
   (p/let [dbs (db-persist/get-all-graphs)]
-    (map (fn [db]
-           (let [graph-name (:name db)]
-             {:url graph-name
-              :metadata (:metadata db)
-              :root (config/get-local-dir graph-name)
-              :nfs? true}))
-         dbs)))
+    (->> dbs
+         (remove (fn [{:keys [name]}]
+                   (= "upload-temp" (some-> name str string/lower-case))))
+         (map (fn [db]
+                (let [graph-name (:name db)]
+                  {:url graph-name
+                   :metadata (:metadata db)
+                   :root (config/get-local-dir graph-name)
+                   :nfs? true}))))))
 
 (defn combine-local-&-remote-graphs
   [local-repos remote-repos]

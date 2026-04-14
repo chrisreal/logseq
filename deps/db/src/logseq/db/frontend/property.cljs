@@ -26,7 +26,7 @@
      * :cardinality - property cardinality. Default to one/single cardinality if not set
      * :hide? - Boolean which hides property when set on a block or exported e.g. slides
      * :public? - Boolean which allows property to be used by user: add and remove property to blocks/pages
-       and queryable via property and has-property rules
+       and queryable via property and has-property rules. When it's not set, it's the same as false
      * :view-context - Keyword to indicate which view contexts a property can be
        seen in when :public? is set. Valid values are :page, :block and :never. Property can
        be viewed in any context if not set
@@ -619,6 +619,26 @@
                                       :schema {:type :entity
                                                :hide? true}
                                       :queryable? true}
+     :logseq.property/deleted-at {:title "Deleted at"
+                                  :schema {:type :datetime
+                                           :hide? true
+                                           :public? false}}
+     :logseq.property/deleted-by-ref {:title "Deleted by"
+                                      :schema {:type :entity
+                                               :hide? true
+                                               :public? false}}
+     :logseq.property.recycle/original-parent {:title "Recycle original parent"
+                                               :schema {:type :node
+                                                        :hide? true
+                                                        :public? false}}
+     :logseq.property.recycle/original-page {:title "Recycle original page"
+                                             :schema {:type :node
+                                                      :hide? true
+                                                      :public? false}}
+     :logseq.property.recycle/original-order {:title "Recycle original order"
+                                              :schema {:type :string
+                                                       :hide? true
+                                                       :public? false}}
      :logseq.property.reaction/emoji-id {:title "Reaction emoji"
                                          :schema {:type :string
                                                   :public? false
@@ -640,13 +660,12 @@
      :logseq.property.sync/large-title-object {:title "Reference to large block title stored in remote object storage"
                                                :schema {:type :map
                                                         :public? false
-                                                        :hide? true}}
-     :logseq.property.embedding/hnsw-label-updated-at {:title "HNSW label updated-at"
-                                                       :schema {:type :datetime
-                                                                :public? false
-                                                                :hide? true}
-                                                       :queryable? false
-                                                       :rtc property-ignore-rtc})))
+                                                        :hide? true}})))
+
+(def public-built-in-properties
+  (->> built-in-properties
+       (keep (fn [[k v]] (when (get-in v [:schema :public?]) k)))
+       set))
 
 (def db-attribute-properties
   "Internal properties that are also db schema attributes"
@@ -698,8 +717,9 @@
     "logseq.property.linked-references" "logseq.property.asset" "logseq.property.table" "logseq.property.node"
     "logseq.property.code" "logseq.property.repeat"
     "logseq.property.journal" "logseq.property.class" "logseq.property.view"
-    "logseq.property.user" "logseq.property.history" "logseq.property.embedding"
-    "logseq.property.reaction" "logseq.property.sync" "logseq.property.publish"})
+    "logseq.property.user" "logseq.property.history"
+    "logseq.property.reaction" "logseq.property.sync" "logseq.property.publish"
+    "logseq.property.recycle"})
 
 (defn logseq-property?
   "Determines if keyword is a logseq property"
@@ -753,11 +773,17 @@
   ;; Disallow tags or page refs as they would create unreferenceable page names
   (not (re-find #"^(#|\[\[)" s)))
 
+(defn built-in-closed-values
+  "Gets :closed-values for given built-in property ident"
+  [ident]
+  (get-in built-in-properties [ident :closed-values]))
+
 (defn get-closed-property-values
   [db property-id]
   (when db
     (when-let [property (d/entity db property-id)]
       (some->> (:block/_closed-value-property property)
+               (remove entity-util/recycled?)
                (sort-by :block/order)))))
 
 (defn closed-value-content
@@ -892,7 +918,7 @@
 
                   :else
                   false)))
-            values)))
+            (remove entity-util/recycled? values))))
 
 (defn lookup
   "Get the property value by a built-in property's db-ident from coll"

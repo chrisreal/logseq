@@ -259,21 +259,24 @@
   (let [switch-repos (if-not (nil? current-repo)
                        (remove (fn [repo] (= current-repo (:url repo))) repos) repos) ; exclude current repo
         repo-links (mapv
-                    (fn [{:keys [url remote? graph-e2ee? rtc-graph? GraphName GraphSchemaVersion GraphUUID] :as graph}]
+                    (fn [{:keys [url remote? graph-e2ee? rtc-graph? GraphName GraphSchemaVersion GraphUUID graph-ready-for-use?] :as graph}]
                       (let [repo-url url
                             short-repo-name (text-util/get-graph-name-from-path repo-url)
-                            downloading? (and downloading-graph-id (= GraphUUID downloading-graph-id))]
+                            downloading? (and downloading-graph-id (= GraphUUID downloading-graph-id))
+                            ready-for-use? (not= false graph-ready-for-use?)]
                         (when short-repo-name
                           {:title [:span.flex.items-center.title-wrap short-repo-name
                                    (when remote? [:span.pl-1.flex.items-center
                                                   {:title (str "<" GraphName "> #" GraphUUID)}
                                                   (ui/icon (if graph-e2ee? "lock" "cloud") {:size 18})
+                                                  (when-not ready-for-use?
+                                                    [:span.opacity.text-sm.pl-1 "preparing"])
                                                   (when downloading?
                                                     [:span.opacity.text-sm.pl-1 "downloading"])])]
                            :hover-detail repo-url ;; show full path on hover
                            :options {:on-click
                                      (fn [e]
-                                       (when-not downloading?
+                                       (when (and ready-for-use? (not downloading?))
                                          (when-let [on-click (:on-click opts)]
                                            (on-click e))
                                          (if (and (gobj/get e "shiftKey")
@@ -446,6 +449,7 @@
   [{:keys [cloud? graph-e2ee? refresh-token token user-uuid e2ee-rsa-key-ensured?]} set-e2ee-rsa-key-ensured?]
   (if (and cloud? graph-e2ee? refresh-token token user-uuid (not e2ee-rsa-key-ensured?))
     (-> (p/do!
+         (state/pub-event! [:rtc/sync-app-state])
          (state/<invoke-db-worker :thread-api/set-db-sync-config
                                   {:enabled? true
                                    :ws-url config/db-sync-ws-url
@@ -457,8 +461,8 @@
                    e)))
     (p/resolved nil)))
 
-(rum/defc new-db-graph
-  []
+(rum/defc new-db-graph-inner
+  [rtc-group?]
   (let [[creating-db? set-creating-db?] (hooks/use-state false)
         [cloud? set-cloud?] (hooks/use-state false)
         [graph-e2ee? set-graph-e2ee?] (hooks/use-state true)
@@ -477,14 +481,10 @@
                            (when cloud?
                              (->
                               (p/do
-                                (state/set-state! :rtc/uploading? true)
-                                (rtc-handler/<rtc-create-graph! repo graph-e2ee?)
-                                (rtc-handler/<get-remote-graphs)
-                                (rtc-flows/trigger-rtc-start repo))
+                                (rtc-handler/<rtc-create-graph-and-start-sync! repo graph-e2ee?))
                               (p/catch (fn [error]
                                          (log/error :create-db-failed error)))
                               (p/finally (fn []
-                                           (state/set-state! :rtc/uploading? false)
                                            (set-creating-db? false)))))
                            (shui/dialog-close!))))))
         submit! (fn submit!
@@ -520,7 +520,7 @@
        :placeholder "your graph name"
        :on-key-down submit!
        :autoComplete "off"})
-     (when (user-handler/rtc-group?)
+     (when rtc-group?
        [:div.flex.flex-col
         [:div.flex.flex-row.items-center.gap-1
          (shui/checkbox
@@ -528,7 +528,7 @@
            :checked cloud?
            :on-checked-change
            (fn []
-             (let [v (boolean (not cloud?))]
+             (let [v (not cloud?)]
                (set-cloud? v)))})
          [:label.opacity-70.text-sm
           {:for "rtc-sync"}
@@ -540,7 +540,7 @@
               :checked graph-e2ee?
               :on-checked-change
               (fn []
-                (set-graph-e2ee? (boolean (not graph-e2ee?))))})
+              (set-graph-e2ee? (not graph-e2ee?)))})
             [:label.opacity-70.text-sm
              {:for "rtc-graph-e2ee"}
              "Encrypt graph data"]])]])
@@ -551,3 +551,8 @@
       (if creating-db?
         (ui/loading "Creating graph")
         "Submit"))]))
+
+(rum/defc new-db-graph < rum/reactive
+  []
+  (let [rtc-group? (user-handler/rtc-group?)]
+    (new-db-graph-inner rtc-group?)))

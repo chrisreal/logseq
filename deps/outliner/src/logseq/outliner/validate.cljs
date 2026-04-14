@@ -11,15 +11,20 @@
             [logseq.db.frontend.entity-util :as entity-util]
             [logseq.db.frontend.property :as db-property]))
 
-(defn ^:api validate-page-title-characters
-  "Validates characters that must not be in a page title"
+(defn ^:api validate-page-title-no-hashtag
+  "Validates a page title doesn't include hashtag character"
   [page-title meta-m]
   (when (string/includes? page-title "#")
     (throw (ex-info "Page name can't include \"#\"."
                     (merge meta-m
                            {:type :notification
                             :payload {:message "Page name can't include \"#\"."
-                                      :type :warning}}))))
+                                      :type :warning}})))))
+
+(defn ^:api validate-page-title-characters
+  "Validates characters that must not be in a page title"
+  [page-title meta-m]
+  (validate-page-title-no-hashtag page-title meta-m)
   (when (and (string/includes? page-title ns-util/parent-char)
              (not (common-date/normalize-date page-title nil)))
     (throw (ex-info "Page name can't include \"/\"."
@@ -140,6 +145,22 @@
                             {:type :notification
                              :payload {:message "This is an invalid property name. A property name cannot start with page reference characters '#' or '[['."
                                        :type :error}}))))))
+
+(defn validate-editing-built-in-property
+  "Validates if built-in property entity is editable for the given attributes to be updated"
+  [entity attribute-map-to-update]
+   ;; Update allowed as needed. Keep this as an allowed list to default to safe editing for built-in entities
+  (let [allowed-attributes #{:logseq.property/hide-empty-value :logseq.property/description}]
+    (when-let [disallowed (and (:logseq.property/built-in? entity)
+                               (not-empty (set/difference (set (keys attribute-map-to-update))
+                                                          allowed-attributes)))]
+      (throw (ex-info "Given built-in property's attributes are not editable"
+                      (merge
+                       {:type :notification
+                        :payload {:message "Can't change the given attributes for a built-in property"
+                                  :type :error}}
+                       {:property (:db/ident entity)
+                        :disallowed-attributes disallowed}))))))
 
 (defn- validate-extends-property-have-correct-type
   "Validates whether given parent and children are classes"

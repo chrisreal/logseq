@@ -2,11 +2,12 @@
   "Handle messages received from the webworkers"
   (:require [cljs-bean.core :as bean]
             [clojure.string :as string]
+            [frontend.common.crypt :as crypt]
             [frontend.handler.notification :as notification]
             [frontend.state :as state]
-            [frontend.undo-redo :as undo-redo]
             [lambdaisland.glogi :as log]
-            [logseq.db :as ldb]))
+            [logseq.db :as ldb]
+            [promesa.core :as p]))
 
 (defmulti handle identity)
 
@@ -24,14 +25,20 @@
   (let [state data]
     (state/pub-event! [:rtc/sync-state state])))
 
-(defmethod handle :vector-search-sync-state [_ _worker data]
-  (state/pub-event! [:vector-search/sync-state data]))
+(defmethod handle :rtc-asset-upload-download-progress [_ _worker {:keys [repo asset-id progress]}]
+  (when (and (seq repo) (seq asset-id) (map? progress))
+    (state/update-state!
+     :rtc/asset-upload-download-progress
+     (fn [m] (assoc-in m [repo asset-id] progress)))))
+
+(defmethod handle :asset-file-write-finish [_ _worker {:keys [repo asset-id ts]}]
+  (when (and (seq repo) (seq asset-id))
+    (state/update-state!
+     :assets/asset-file-write-finish
+     (fn [m] (assoc-in m [repo asset-id] (or ts (.now js/Date)))))))
 
 (defmethod handle :sync-db-changes [_ _worker data]
   (state/pub-event! [:db/sync-changes data]))
-
-(defmethod handle :clear-undo-history [_ _worker [repo]]
-  (undo-redo/clear-history! repo))
 
 (defmethod handle :rtc-log [_ _worker log]
   (state/pub-event! [:rtc/log log]))
@@ -46,9 +53,6 @@
 (defmethod handle :capture-error [_ _worker data]
   (state/pub-event! [:capture-error data]))
 
-(defmethod handle :vector-search/load-model-progress [_ _ data]
-  (state/pub-event! [:vector-search/load-model-progress data]))
-
 (defmethod handle :backup-file [_ _worker data]
   (state/pub-event! [:graph/backup-file data]))
 
@@ -57,6 +61,63 @@
 
 (defmethod handle :remote-graph-gone []
   (state/pub-event! [:rtc/remote-graph-gone]))
+
+(defn- <invoke-worker-thread-api
+  [wrapped-worker qkw & args]
+  (apply wrapped-worker qkw false args))
+
+(defn- ui-request-error->payload
+  [error]
+  (let [data (ex-data error)]
+    (merge {:code (or (:code data) :ui-request-failed)
+            :message (or (ex-message error) (str error))}
+           (when (seq data)
+             {:data data}))))
+
+(defn- <db-worker-ui-action
+  [action payload]
+  (case action
+    :request-e2ee-password
+    (p/let [password-promise (state/pub-event! [:rtc/request-e2ee-password payload])
+            password password-promise]
+      {:password password})
+
+    :decrypt-user-e2ee-private-key
+    (let [encrypted-private-key (:encrypted-private-key payload)]
+      (p/let [private-key-promise (state/pub-event! [:rtc/decrypt-user-e2ee-private-key encrypted-private-key])
+              private-key private-key-promise]
+        (crypt/<export-private-key private-key)))
+
+    (p/rejected (ex-info "unsupported db-worker ui action"
+                         {:code :unsupported-ui-action
+                          :action action
+                          :payload payload}))))
+
+(defn- <handle-db-worker-ui-request
+  [wrapped-worker {:keys [request-id action payload]}]
+  (if (and (string? request-id) (keyword? action))
+    (-> (<db-worker-ui-action action payload)
+        (p/then (fn [result]
+                  (<invoke-worker-thread-api wrapped-worker
+                                             :thread-api/resolve-ui-request
+                                             request-id
+                                             result)))
+        (p/catch (fn [error]
+                   (log/warn :db-worker/ui-request-failed
+                             {:request-id request-id
+                              :action action
+                              :error error})
+                   (<invoke-worker-thread-api wrapped-worker
+                                              :thread-api/reject-ui-request
+                                              request-id
+                                              (ui-request-error->payload error)))))
+    (log/error :db-worker/ui-request-invalid
+               {:request-id request-id
+                :action action
+                :payload payload})))
+
+(defmethod handle :db-worker/ui-request [_ wrapped-worker data]
+  (<handle-db-worker-ui-request wrapped-worker data))
 
 (defmethod handle :default [_ _worker data]
   (prn :debug "Worker data not handled: " data))

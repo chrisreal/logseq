@@ -16,6 +16,7 @@ node_modules/
 static/**
 tmp
 cljs-test-runner-out
+.tmp/
 
 .cpcache/
 /src/gen
@@ -44,6 +45,7 @@ resources/electron.js
 /libs/dist/
 charlie/
 .vscode
+/.claude
 /.preprocessor-cljs
 docker
 android/app/src/main/assets/capacitor.plugin.json
@@ -62,7 +64,6 @@ android/app/src/main/assets/capacitor.config.json
 .yarn/
 .yarnrc.yml
 
-packages/ui/.storybook/cljs
 deps/shui/.lsp
 deps/shui/.lsp-cache
 deps/shui/.clj-kondo
@@ -81,3 +82,9 @@ clj-e2e/e2e-dump
 .dir-locals.el
 .projectile
 deps/db-sync/data
+*.map
+/dist/db-worker-node.js
+/dist/build/
+/dist/db-worker-node-assets.json
+/dist/*.wasm
+/dist/cljs-runtime/

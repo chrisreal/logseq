@@ -61,7 +61,6 @@
    and :fix."
   [["65.7" {:fix add-quick-add-page}]
    ["65.8" {:fix add-missing-page-name}]
-   ["65.9" {:properties [:logseq.property.embedding/hnsw-label-updated-at]}]
    ["65.10" {:properties [:block/journal-day :logseq.property.view/sort-groups-by-property :logseq.property.view/sort-groups-desc?]}]
    ["65.11" {:fix remove-block-path-refs}]
    ["65.12" {:fix remove-position-property-from-url-properties}]
@@ -76,7 +75,12 @@
    ["65.21" {:properties [:logseq.property.sync/large-title-object]}]
    ["65.22" {:properties [:logseq.property.reaction/emoji-id
                           :logseq.property.reaction/target]}]
-   ["65.23" {:properties [:logseq.property.asset/align]}]])
+   ["65.23" {:properties [:logseq.property.asset/align]}]
+   ["65.24" {:properties [:logseq.property/deleted-at
+                          :logseq.property/deleted-by-ref
+                          :logseq.property.recycle/original-parent
+                          :logseq.property.recycle/original-page
+                          :logseq.property.recycle/original-order]}]])
 
 (let [[major minor] (last (sort (map (comp (juxt :major :minor) db-schema/parse-schema-version first)
                                      schema-version->updates)))]

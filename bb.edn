@@ -2,21 +2,21 @@
  :deps
  {metosin/malli
   {:mvn/version "0.16.1"}
-  borkdude/rewrite-edn {:mvn/version "0.4.9"}
+  borkdude/rewrite-edn {:mvn/version "0.5.9"}
   logseq/bb-tasks
   #_{:local/root "../bb-tasks"}
   {:git/url "https://github.com/logseq/bb-tasks"
-   :git/sha "70d3edeb287f5cec7192e642549a401f7d6d4263"}
+   :git/sha "acb3d3d5d38c4ac16f617cb10ae6f99fe1b8de6e"}
   logseq/graph-parser
   {:local/root "deps/graph-parser"}
   org.clj-commons/digest
   {:mvn/version "1.4.100"}
   cheshire/cheshire
-  {:mvn/version "5.12.0"}}
+  {:mvn/version "6.2.0"}}
  :pods
- {clj-kondo/clj-kondo {:version "2024.09.27"}
-  org.babashka/fswatcher {:version "0.0.3"}
-  org.babashka/go-sqlite3 {:version "0.1.0"}}
+ {clj-kondo/clj-kondo {:version "2026.01.19"}
+  org.babashka/fswatcher {:version "0.0.7"}
+  org.babashka/go-sqlite3 {:version "0.3.13"}}
  :tasks
  {dev:desktop-watch
   logseq.tasks.dev.desktop/watch
@@ -67,10 +67,11 @@
            (run '-dev:publishing-dev {:parallel true})
            (run '-dev:publishing-release))}
 
+  ;; legacy cli
   dev:cli
   {:doc "Run CLI with current deps/db code. Commands with JS deps are not usable e.g. mcp-server"
    :task (apply shell {:dir "deps/db"}
-                "yarn nbb-logseq -cp src:../cli/src:../graph-parser/src:../outliner/src -m logseq.cli" *command-line-args*)}
+                "yarn -s nbb-logseq -cp src:../cli/src:../graph-parser/src:../outliner/src -m logseq.cli" *command-line-args*)}
   dev:query
   {:doc "Query a DB graph's datascript db"
    :requires ([babashka.fs :as fs])
@@ -181,6 +182,20 @@
 
   dev:gen-malli-kondo-config
   logseq.tasks.dev/gen-malli-kondo-config
+
+  dev:db-worker-node
+  {:doc "Compile and start db-worker-node (pass-through args forwarded to node)"
+   :task (do
+           (shell "clojure" "-M:cljs" "compile" "db-worker-node")
+           (apply shell "node" "./static/db-worker-node.js" *command-line-args*))}
+
+  dev:cli-e2e
+  {:doc "Run shell-first CLI end-to-end tests"
+   :task (apply shell {:shutdown nil} "bb" "-f" "cli-e2e/bb.edn" "test" *command-line-args*)}
+
+  dev:cli-e2e-sync
+  {:doc "Run shell-first CLI sync end-to-end tests"
+   :task (apply shell {:shutdown nil} "bb" "-f" "cli-e2e/bb.edn" "test-sync" *command-line-args*)}
 
   lint:dev
   logseq.tasks.dev.lint/dev

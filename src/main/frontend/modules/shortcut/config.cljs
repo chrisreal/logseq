@@ -364,7 +364,7 @@
                                              :inactive config/publishing?
                                              :binding false}
 
-   :graph/db-save                           {:fn #(state/pub-event! [:graph/save-db-to-disk])
+   :graph/db-save                           {:fn #(state/pub-event! [:graph/db-save-shortcut])
                                              :inactive (not (util/electron?))
                                              :binding "mod+s"}
 
@@ -508,6 +508,9 @@
    :dev/validate-db   {:binding []
                        :inactive (not (state/developer-mode?))
                        :fn :frontend.handler.common.developer/validate-db}
+   :dev/recompute-checksum {:binding []
+                            :inactive (not (state/developer-mode?))
+                            :fn :frontend.handler.common.developer/recompute-checksum-diagnostics}
    :dev/rtc-stop {:binding []
                   :inactive (not (state/developer-mode?))
                   :fn :frontend.handler.common.developer/rtc-stop}
@@ -710,6 +713,7 @@
           :dev/show-page-data
           :dev/replace-graph-with-db-file
           :dev/validate-db
+          :dev/recompute-checksum
           :dev/gc-graph
           :dev/rtc-stop
           :dev/rtc-start
@@ -873,6 +877,7 @@
      :dev/show-page-data
      :dev/replace-graph-with-db-file
      :dev/validate-db
+     :dev/recompute-checksum
      :dev/gc-graph
      :dev/rtc-stop
      :dev/rtc-start

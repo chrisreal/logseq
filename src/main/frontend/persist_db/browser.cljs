@@ -6,7 +6,6 @@
             [electron.ipc :as ipc]
             [frontend.common.thread-api :as thread-api :refer [def-thread-api]]
             [frontend.config :as config]
-            [frontend.db :as db]
             [frontend.db.transact :as db-transact]
             [frontend.handler.notification :as notification]
             [frontend.handler.worker :as worker-handler]
@@ -48,7 +47,9 @@
                        old-state (f prev)
                        new-state (f current)]
                    (when (not= new-state old-state)
-                     (undo-redo/record-ui-state! (state/get-current-repo) (ldb/write-transit-str {:old-state old-state :new-state new-state}))))))))
+                     (let [repo (state/get-current-repo)
+                           ui-state-str (ldb/write-transit-str {:old-state old-state :new-state new-state})]
+                       (undo-redo/record-ui-state! repo ui-state-str))))))))
 
 (defn transact!
   [repo tx-data tx-meta]
@@ -87,6 +88,9 @@
 
 (defn stop-db-worker!
   []
+  (when @state/*db-worker
+    (-> (state/<invoke-db-worker :thread-api/cancel-ui-requests {:reason :stop-db-worker})
+        (p/catch (constantly nil))))
   (when-let [^js worker @state/*db-worker-thread]
     (set! (.-onmessage worker) nil)
     (.terminate worker))
@@ -95,19 +99,6 @@
   (set! (.-workerThread js/window) nil)
   (reset! state/*db-worker-thread nil)
   (reset! state/*db-worker nil))
-
-(defn stop-inference-worker!
-  []
-  (when-let [^js port @state/*infer-worker-port]
-    (set! (.-onmessage port) nil)
-    (.close port))
-  (reset! state/*infer-worker-port nil)
-  (reset! state/*infer-worker nil))
-
-(defn stop-workers!
-  []
-  (stop-inference-worker!)
-  (stop-db-worker!))
 
 (defn start-db-worker!
   []
@@ -127,12 +118,8 @@
                             (p/let [result (.remoteInvoke ^js wrapped-worker*
                                                           (str (namespace qkw) "/" (name qkw))
                                                           direct-pass?
-                                                          (cond
-                                                            (= qkw :thread-api/set-infer-worker-proxy)
-                                                            (first args)
-                                                            direct-pass?
+                                                          (if direct-pass?
                                                             (into-array args)
-                                                            :else
                                                             (ldb/write-transit-str args)))]
                               (if direct-pass?
                                 result
@@ -161,38 +148,6 @@
                                       (assoc tx-meta :client-id (:client-id @state/state))))))
            (p/catch (fn [error]
                       (log/error :init-sqlite-wasm-error ["Can't init SQLite wasm" error]))))))))
-
-(defn <check-webgpu-available?
-  []
-  (if (some? js/navigator.gpu)
-    (p/chain (js/navigator.gpu.requestAdapter) some?)
-    (p/promise false)))
-
-(defn start-inference-worker!
-  []
-  (when-not util/node-test?
-    (stop-inference-worker!)
-    (let [worker-url "js/inference-worker.js"
-          ^js worker (js/SharedWorker.
-                      (str worker-url
-                           "?electron=" (util/electron?)
-                           "&capacitor=" (util/capacitor?)
-                           "&publishing=" config/publishing?))
-          ^js port (.-port worker)
-          wrapped-worker (Comlink/wrap port)
-          t1 (util/time-ms)]
-      (worker-handler/handle-message! port wrapped-worker)
-      (reset! state/*infer-worker-port port)
-      (reset! state/*infer-worker wrapped-worker)
-      (p/do!
-       (let [embedding-model-name (ldb/get-key-value (db/get-db) :logseq.kv/graph-text-embedding-model-name)]
-         (.init wrapped-worker embedding-model-name))
-       (log/info "init infer-worker spent:" (str (- (util/time-ms) t1) "ms"))))))
-
-(defn <connect-db-worker-and-infer-worker!
-  []
-  (assert (and @state/*infer-worker @state/*db-worker))
-  (state/<invoke-db-worker-direct-pass :thread-api/set-infer-worker-proxy (Comlink/proxy @state/*infer-worker)))
 
 (defn <export-db!
   [repo data]

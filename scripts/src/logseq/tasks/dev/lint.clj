@@ -18,14 +18,14 @@
                "bb lang:validate-translations"
                "bb lint:ns-docstrings"]]
     (println cmd)
-    (shell cmd)))
+    (shell {:shutdown nil} cmd)))
 
 (defn kondo-git-changes
   "Run clj-kondo across dirs and only for files that git diff detects as unstaged changes"
   []
   (let [kondo-dirs ["src" "deps/common" "deps/db" "deps/graph-parser" "deps/outliner" "deps/publishing" "deps/publish" "deps/cli"]
         dir-regex (re-pattern (str "^(" (string/join "|" kondo-dirs) ")"))
-        dir-to-files (->> (shell {:out :string} "git diff --name-only")
+        dir-to-files (->> (shell {:out :string :shutdown nil} "git diff --name-only")
                           :out
                           string/split-lines
                           (filter #(re-find #"\.(cljs|clj|cljc)$" %))
@@ -38,18 +38,18 @@
               files (mapv #(string/replace-first % (str dir "/") "") files*)
               cmd (str "cd " dir " && clj-kondo --lint " (string/join " " files))
               _ (println cmd)
-              res (apply shell {:dir dir :continue :true} "clj-kondo --lint" files)]
+              res (apply shell {:dir dir :continue :true :shutdown nil} "clj-kondo --lint" files)]
           (when (pos? (:exit res)) (System/exit (:exit res)))))
       (println "No clj* files have changed to lint."))))
 
 (defn- validate-frontend-not-in-workers
   []
-  (let [res (shell {:out :string}
+  (let [res (shell {:out :string :shutdown nil}
                    "git grep -h" "\\[frontend.*:as"
-                   "src/main/frontend/worker" "src/main/frontend/worker_common" "src/main/frontend/inference_worker")
+                   "src/main/frontend/worker" "src/main/frontend/worker_common")
         req-lines (->> (:out res)
                        string/split-lines
-                       (remove #(re-find #"frontend\.worker|frontend\.common|frontend\.inference-worker" %)))]
+                       (remove #(re-find #"frontend\.worker|frontend\.common" %)))]
 
     (if (seq req-lines)
       (do
@@ -60,13 +60,20 @@
 
 (defn- validate-workers-not-in-frontend
   []
-  (let [res (shell {:out :string :continue true}
-                   "grep -r --exclude-dir=worker --exclude-dir=inference_worker" "\\[frontend.worker.*:" "src/main/frontend")
+  (let [res (shell {:out :string :continue true :shutdown nil}
+                   "git grep --untracked --exclude-standard"
+                   "\\[frontend.worker.*:" "--" "src/main/frontend")
         ;; allow reset-file b/c it's only affects tests
         allowed-exceptions #{"src/main/frontend/handler/file_based/file.cljs:            [frontend.worker.file.reset :as file-reset]"}
+        excluded-path-prefixes ["src/main/frontend/worker/"]
         invalid-lines (when (= 0 (:exit res))
-                        (remove #(some->> % (contains? allowed-exceptions))
-                                (string/split-lines (:out res))))
+                        (->> (:out res)
+                             string/split-lines
+                             (remove (fn [line]
+                                       (let [path (first (string/split line #":" 2))]
+                                         (or (contains? allowed-exceptions line)
+                                             (some #(string/starts-with? path %)
+                                                   excluded-path-prefixes)))))))
         _ (when (> (:exit res) 1) (System/exit 1))]
     (if (and (= 0 (:exit res)) (seq invalid-lines))
       (do (println "The following worker requires should not be in frontend namespaces:")

@@ -1,0 +1,166 @@
+(ns logseq.cli.config-test
+  (:require [cljs.reader :as reader]
+            [cljs.test :refer [deftest is testing]]
+            [frontend.test.node-helper :as node-helper]
+            [goog.object :as gobj]
+            [logseq.cli.config :as config]
+            ["fs" :as fs]
+            ["os" :as os]
+            ["path" :as node-path]))
+
+(defn- with-env
+  [env f]
+  (let [original (js/Object.assign #js {} (.-env js/process))]
+    (doseq [[k v] env]
+      (if (some? v)
+        (gobj/set (.-env js/process) k v)
+        (gobj/remove (.-env js/process) k)))
+    (try
+      (f)
+      (finally
+        (set! (.-env js/process) original)))))
+
+(deftest test-config-precedence
+  (let [dir (node-helper/create-tmp-dir)
+        cfg-path (node-path/join dir "cli.edn")
+        _ (fs/writeFileSync cfg-path
+                            (str "{:graph \"file-repo\" "
+                                 ":data-dir \"file-data\" "
+                                 ":timeout-ms 111 "
+                                 ":login-timeout-ms 444 "
+                                 ":logout-timeout-ms 555 "
+                                 ":output-format :edn "
+                                 ":auth-token \"file-secret\" "
+                                 ":e2ee-password \"legacy-password\"}"))
+        env {"LOGSEQ_CLI_GRAPH" "env-repo"
+             "LOGSEQ_CLI_DATA_DIR" "env-data"
+             "LOGSEQ_CLI_TIMEOUT_MS" "222"
+             "LOGSEQ_CLI_LOGIN_TIMEOUT_MS" "666"
+             "LOGSEQ_CLI_LOGOUT_TIMEOUT_MS" "777"
+             "LOGSEQ_CLI_OUTPUT" "json"}
+        opts {:config-path cfg-path
+              :graph "cli-repo"
+              :data-dir "cli-data"
+              :timeout-ms 333
+              :login-timeout-ms 888
+              :logout-timeout-ms 999
+              :output-format :human}
+        result (with-env env #(config/resolve-config opts))]
+    (is (= cfg-path (:config-path result)))
+    (is (= "cli-repo" (:graph result)))
+    (is (= "cli-data" (:data-dir result)))
+    (is (= 333 (:timeout-ms result)))
+    (is (= 888 (:login-timeout-ms result)))
+    (is (= 999 (:logout-timeout-ms result)))
+    (is (nil? (:auth-token result)))
+    (is (nil? (:retries result)))
+    (is (nil? (:e2ee-password result)))
+    (is (= :human (:output-format result)))))
+
+(deftest test-env-overrides-file
+  (let [dir (node-helper/create-tmp-dir)
+        cfg-path (node-path/join dir "cli.edn")
+        _ (fs/writeFileSync cfg-path "{:graph \"file-repo\" :data-dir \"file-data\"}")
+        env {"LOGSEQ_CLI_GRAPH" "env-repo"
+             "LOGSEQ_CLI_DATA_DIR" "env-data"}
+        result (with-env env #(config/resolve-config {:config-path cfg-path}))]
+    (is (= "env-repo" (:graph result)))
+    (is (= "env-data" (:data-dir result)))))
+
+(deftest test-output-format-env-overrides-file
+  (let [dir (node-helper/create-tmp-dir)
+        cfg-path (node-path/join dir "cli.edn")
+        _ (fs/writeFileSync cfg-path "{:output-format :edn}")
+        env {"LOGSEQ_CLI_OUTPUT" "json"}
+        result (with-env env #(config/resolve-config {:config-path cfg-path}))]
+    (is (= :json (:output-format result)))))
+
+(deftest test-output-format-precedence
+  (let [dir (node-helper/create-tmp-dir)
+        cfg-path (node-path/join dir "cli.edn")
+        _ (fs/writeFileSync cfg-path "{:output-format :edn}")
+        env {"LOGSEQ_CLI_OUTPUT" "json"}
+        result (with-env env #(config/resolve-config {:config-path cfg-path
+                                                      :output "human"}))]
+    (is (= :human (:output-format result)))))
+
+(deftest test-output-format-overrides-output
+  (let [result (config/resolve-config {:output-format :edn
+                                       :output "json"})]
+    (is (= :edn (:output-format result)))))
+
+(deftest test-output-format-invalid-values-fallback
+  (let [dir (node-helper/create-tmp-dir)
+        cfg-path (node-path/join dir "cli.edn")
+        _ (fs/writeFileSync cfg-path "{:output-format :edn}")
+        env {"LOGSEQ_CLI_OUTPUT" "yaml"}
+        result (with-env env #(config/resolve-config {:config-path cfg-path
+                                                      :output "xml"}))]
+    (is (= :edn (:output-format result)))))
+
+(deftest test-default-paths
+  (let [result (config/resolve-config {})
+        expected-config-path (node-path/join (.homedir os) "logseq" "cli.edn")]
+    (is (= expected-config-path (:config-path result)))
+    (is (= "~/logseq/graphs" (:data-dir result)))
+    (is (= "wss://api-staging.logseq.io/sync/%s" (:ws-url result)))
+    (is (= "https://api-staging.logseq.io" (:http-base result)))
+    (is (= 10000 (:timeout-ms result)))
+    (is (= 300000 (:login-timeout-ms result)))
+    (is (= 120000 (:logout-timeout-ms result)))
+    (is (= 40 (:list-title-max-display-width result)))))
+
+(deftest test-list-title-max-display-width-config
+  (testing "reads valid list-title-max-display-width from cli.edn"
+    (let [dir (node-helper/create-tmp-dir)
+          cfg-path (node-path/join dir "cli.edn")
+          _ (fs/writeFileSync cfg-path "{:list-title-max-display-width 72}")
+          result (config/resolve-config {:config-path cfg-path})]
+      (is (= 72 (:list-title-max-display-width result)))))
+
+  (testing "falls back to default when cli.edn value is invalid"
+    (doseq [[label file-value]
+            [["zero" "0"]
+             ["negative" "-3"]
+             ["non-numeric" "\"abc\""]]]
+      (let [dir (node-helper/create-tmp-dir)
+            cfg-path (node-path/join dir "cli.edn")
+            _ (fs/writeFileSync cfg-path (str "{:list-title-max-display-width " file-value "}"))
+            result (config/resolve-config {:config-path cfg-path})]
+        (is (= 40 (:list-title-max-display-width result)) label)))))
+
+(deftest test-update-config
+  (let [dir (node-helper/create-tmp-dir "cli")
+        cfg-path (node-path/join dir "cli.edn")
+        _ (fs/writeFileSync cfg-path "{:graph \"old\"}")
+        _ (config/update-config! {:config-path cfg-path} {:graph "new"})
+        contents (.toString (fs/readFileSync cfg-path) "utf8")
+        parsed (reader/read-string contents)]
+    (is (= "new" (:graph parsed)))))
+
+(deftest test-update-config-strips-removed-options
+  (let [dir (node-helper/create-tmp-dir "cli")
+        cfg-path (node-path/join dir "cli.edn")
+        _ (fs/writeFileSync cfg-path "{:graph \"old\" :auth-token \"legacy-secret\" :e2ee-password \"legacy-password\"}")
+        _ (config/update-config! {:config-path cfg-path}
+                                 {:graph "new"
+                                  :auth-token "secret"
+                                  :retries 2
+                                  :e2ee-password "new-password"})
+        contents (.toString (fs/readFileSync cfg-path) "utf8")
+        parsed (reader/read-string contents)]
+    (is (= "new" (:graph parsed)))
+    (is (not (contains? parsed :auth-token)))
+    (is (not (contains? parsed :retries)))
+    (is (not (contains? parsed :e2ee-password)))))
+
+(deftest test-update-config-removes-nil-values
+  (let [dir (node-helper/create-tmp-dir "cli")
+        cfg-path (node-path/join dir "cli.edn")
+        _ (fs/writeFileSync cfg-path "{:graph \"old\" :auth-token \"secret\"}")
+        _ (config/update-config! {:config-path cfg-path}
+                                 {:auth-token nil})
+        contents (.toString (fs/readFileSync cfg-path) "utf8")
+        parsed (reader/read-string contents)]
+    (is (= "old" (:graph parsed)))
+    (is (not (contains? parsed :auth-token)))))

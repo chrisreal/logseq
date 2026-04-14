@@ -38,7 +38,6 @@
             [logseq.shui.ui :as shui]
             [medley.core :as medley]
             [promesa.core :as p]
-            [react-draggable]
             [reitit.frontend.easy :as rfe]
             [rum.core :as rum]))
 
@@ -196,11 +195,13 @@
       [:p.mb-2 [:b "Document mode"]]
       [:ul
        [:li
-        [:div.inline-block.mr-1 (ui/render-keyboard-shortcut (shortcut-dh/gen-shortcut-seq :editor/new-line))]
+        [:div.inline-block.mr-1 (ui/render-keyboard-shortcut (shortcut-dh/gen-shortcut-seq :editor/new-line)
+                                                             :shortcut-id :editor/new-line)]
         [:p.inline-block "to create new block"]]
        [:li
         [:p.inline-block.mr-1 "Click `D` or type"]
-        [:div.inline-block.mr-1 (ui/render-keyboard-shortcut (shortcut-dh/gen-shortcut-seq :ui/toggle-document-mode))]
+        [:div.inline-block.mr-1 (ui/render-keyboard-shortcut (shortcut-dh/gen-shortcut-seq :ui/toggle-document-mode)
+                                                             :shortcut-id :ui/toggle-document-mode)]
         [:p.inline-block "to toggle document mode"]]]])))
 
 (def help-menu-items
@@ -289,9 +290,12 @@
                             (fn [content & {:as option}]
                               (shui/popup-show! e
                                                 (fn [{:keys [id]}]
-                                                  [:div {:on-click (fn [e]
-                                                                     (when-not (util/input? (.-target e))
-                                                                       (shui/popup-hide! id)))
+                                                  [:div {:on-click (fn [^js e]
+                                                                     (when-let [target (.-target e)]
+                                                                       (let [input? (util/input? target)
+                                                                             popup? (.closest target "[data-radix-popper-content-wrapper]")]
+                                                                         (when (not (or input? popup?))
+                                                                           (shui/popup-hide! id)))))
                                                          :data-keep-selection true}
                                                    content])
                                                 (merge

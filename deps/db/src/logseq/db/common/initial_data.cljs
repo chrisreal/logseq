@@ -333,7 +333,6 @@
                         :logseq.kv/graph-remote?
                         :logseq.kv/latest-code-lang
                         :logseq.kv/graph-backup-folder
-                        :logseq.kv/graph-text-embedding-model-name
                         :logseq.property/empty-placeholder])
         favorites (get-favorites db)
         recent-updated-pages (let [pages (get-recent-updated-pages db)]
@@ -343,9 +342,10 @@
         user-datoms (get-all-user-datoms db)
         pages-datoms (let [contents-id (get-first-page-by-title db "Contents")
                            capture-page-id (:db/id (db-db/get-built-in-page db common-config/quick-add-page-name))
-                           views-id (get-first-page-by-title db common-config/views-page-name)]
+                           views-id (get-first-page-by-title db common-config/views-page-name)
+                           recycle-id (get-first-page-by-title db "Recycle")]
                        (mapcat #(d/datoms db :eavt %)
-                               (remove nil? [contents-id capture-page-id views-id])))
+                               (remove nil? [contents-id capture-page-id views-id recycle-id])))
         data (->> (concat idents
                           structured-datoms
                           user-datoms

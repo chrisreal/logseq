@@ -60,9 +60,6 @@
   [qkw & args]
   (<invoke-db-worker* qkw true args))
 
-(defonce *infer-worker (atom nil))
-(defonce *infer-worker-port (atom nil))
-
 ;; Stores main application state
 (defonce ^:large-vars/data-var state
   (let [document-mode? (or (storage/get :document/mode?) false)
@@ -317,10 +314,7 @@
                                                        3))
       :favorites/updated?                    (atom 0)
       :db/async-queries                      (atom {})
-      :db/latest-transacted-entity-uuids     (atom {})
-
-      :vector-search/state                   (atom {})
-      :vector-search/load-model-progress     (atom nil)})))
+      :db/latest-transacted-entity-uuids     (atom {})})))
 
 ;; User configuration getters under :config (and sometimes :me)
 ;; ========================================
@@ -475,7 +469,10 @@ should be done through this fn in order to get global config and config defaults
    "MMM do, yyyy"))
 
 (defn custom-shortcuts []
-  (merge (storage/get :ls-shortcuts)
+  (merge (try (storage/get :ls-shortcuts)
+              (catch :default e
+                (prn :shortcut/storage-read-error e)
+                nil))
          (:shortcuts (get-config))))
 
 (defn get-commands
@@ -1040,7 +1037,14 @@ Similar to re-frame subscriptions"
    (set-selection-blocks! blocks nil))
   ([blocks direction]
    (when (seq blocks)
-     (let [blocks (vec (remove nil? blocks))]
+     (let [blocks (->> blocks
+                       (remove nil?)
+                       (remove (fn [block]
+                                 (when-let [id (some-> block (dom/attr "blockid"))]
+                                   (when-let [conn (db-conn-state/get-conn (get-current-repo))]
+                                     (when-let [entity (d/entity @conn [:block/uuid (uuid id)])]
+                                       (ldb/recycled? entity))))))
+                       vec)]
        (set-selection-blocks-aux! blocks)
        (when direction (set-state! :selection/direction direction))
        (let [ids (get-selection-block-ids)]
@@ -1649,6 +1653,7 @@ Similar to re-frame subscriptions"
       (if (and page
                ;; TODO: Use config/dev? when it's not a circular dep
                (not goog.DEBUG)
+               (not= common-config/recycle-page-name (:block/title page))
                (or (and (ldb/hidden? page) (not (ldb/property? page)))
                    (and (ldb/built-in? page) (ldb/private-built-in-page? page))))
         (pub-event! [:notification/show {:content "Cannot open an internal page." :status :warning}])
@@ -2033,11 +2038,18 @@ Similar to re-frame subscriptions"
 
 (defn get-editor-info
   []
-  (when-let [edit-block (get-edit-block)]
-    {:block-uuid (:block/uuid edit-block)
-     :container-id (or @(:editor/container-id @state) :unknown-container)
-     :start-pos @(:editor/start-pos @state)
-     :end-pos (get-edit-pos)}))
+  (let [selected-block-uuids (some-> (get-selection-block-ids) seq vec)
+        selection-info (when selected-block-uuids
+                         {:selected-block-uuids selected-block-uuids
+                          :selection-direction (get-selection-direction)})]
+    (if-let [edit-block (get-edit-block)]
+      (cond-> {:block-uuid (:block/uuid edit-block)
+               :container-id (or @(:editor/container-id @state) :unknown-container)
+               :start-pos @(:editor/start-pos @state)
+               :end-pos (get-edit-pos)}
+        selection-info
+        (merge selection-info))
+      selection-info)))
 
 (defn conj-block-ref!
   [ref-entity]

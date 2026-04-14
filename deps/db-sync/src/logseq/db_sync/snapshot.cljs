@@ -21,15 +21,6 @@
   [payload]
   (transit/read transit-r (.decode text-decoder (->uint8 payload))))
 
-(defn frame-bytes
-  [^js payload]
-  (let [len (.-byteLength payload)
-        out (js/Uint8Array. (+ 4 len))
-        view (js/DataView. (.-buffer out))]
-    (.setUint32 view 0 len false)
-    (.set out payload 4)
-    out))
-
 (defn concat-bytes
   [^js a ^js b]
   (cond
@@ -69,11 +60,3 @@
       (if (and (seq rows) (or (nil? buffer) (zero? (.-byteLength buffer))))
         rows
         (throw (ex-info "incomplete framed buffer" {:buffer buffer :rows rows}))))))
-
-(defn framed-length
-  [rows-batches]
-  (reduce (fn [total rows]
-            (let [payload (encode-rows rows)]
-              (+ total 4 (.-byteLength payload))))
-          0
-          rows-batches))
