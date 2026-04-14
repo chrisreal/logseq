@@ -1,6 +1,9 @@
 name: CLI Build Temp
 
 on:
+  push:
+    branches:
+      - temp/cli-build-feat-cliable
   workflow_dispatch:
     inputs:
       git-ref:
