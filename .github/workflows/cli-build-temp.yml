@@ -47,7 +47,7 @@ jobs:
           bb: ${{ env.BABASHKA_VERSION }}
 
       - name: Fetch yarn deps
-        run: yarn install --frozen-lockfile
+        run: yarn install --ignore-scripts --pure-lockfile
 
       - name: Compile CLI and db-worker-node
         run: clojure -M:cljs compile logseq-cli db-worker-node && yarn db-worker-node:compile:bundle
